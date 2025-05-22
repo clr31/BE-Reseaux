@@ -1,5 +1,9 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
+#define MAX_SIZE 5
+
+mic_tcp_sock sockets[MAX_SIZE] ;
+mic_tcp_sock_addr addr_distant ;
 
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
@@ -7,12 +11,17 @@
  */
 int mic_tcp_socket(start_mode sm)
 {
-   int result = -1;
    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-   result = initialize_components(sm); /* Appel obligatoire */
+   if(initialize_components(sm)==-1) {
+        printf("Erreur initialisation composantsde l'API\n") ;
+        return -1 ;
+   } /* Appel obligatoire */
    set_loss_rate(0);
 
-   return result;
+   sockets[0].port = 2000 ;
+   sockets[0].fd = 1 ;
+
+   return sockets[0].fd ;
 }
 
 /*
@@ -22,7 +31,9 @@ int mic_tcp_socket(start_mode sm)
 int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
 {
    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-   return -1;
+
+   sockets[socket].addr = addr ;
+   return 0;
 }
 
 /*
@@ -32,7 +43,7 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-    return -1;
+    return 0;
 }
 
 /*
@@ -42,7 +53,8 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-    return -1;
+    addr_distant.addr = addr ;
+    return 0;
 }
 
 /*
@@ -64,7 +76,11 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-    return -1;
+    payload.data = mesg ;
+    payload.size = max_mesg_size ;
+    int lu = app_buffer_get(payload) ;
+
+    return lu;
 }
 
 /*
@@ -75,7 +91,8 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 int mic_tcp_close (int socket)
 {
     printf("[MIC-TCP] Appel de la fonction :  "); printf(__FUNCTION__); printf("\n");
-    return -1;
+    //sockets[0].state = IDDLE ;
+    return 0;
 }
 
 /*
@@ -87,4 +104,7 @@ int mic_tcp_close (int socket)
 void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_ip_addr remote_addr)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+
+    if(pdu.header.dest_port != sockets[0].addr.port) return -1 ;
+    app_buffer_put(pdu.payload) ;
 }
