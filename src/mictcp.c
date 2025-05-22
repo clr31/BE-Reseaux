@@ -18,7 +18,6 @@ int mic_tcp_socket(start_mode sm)
    } /* Appel obligatoire */
    set_loss_rate(0);
 
-   sockets[0].port = 2000 ;
    sockets[0].fd = 1 ;
 
    return sockets[0].fd ;
