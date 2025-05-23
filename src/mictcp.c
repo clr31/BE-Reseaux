@@ -16,11 +16,12 @@ int mic_tcp_socket(start_mode sm)
         return -1 ;
    } /* Appel obligatoire */
    set_loss_rate(0);
-
+   
+   //pour les versions suivantes faire une fonction qui peut créer plusieurs sockets
+   //boucle while qui teste l'état ?
    sockets[0].fd = 0 ;
    sockets[0].state = IDLE ;
-
-   return sockets[0].fd ;
+   return 0 ;
 }
 
 /*
@@ -113,7 +114,10 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
 
-    if(pdu.header.dest_port != sockets[0].local_addr.port) {
+    if(pdu.header.dest_port != sockets[0].local_addr.port) { //ok pour un seul socket à 
+    // partir de plusieurs faire un test qui parcours tous les éléments du tableau de 
+    // sockets pour vérifier si le port de destination du pdu correspond à un unique 
+    // socket
         printf("port destination du pdu : %d\n", pdu.header.dest_port) ;
         printf("port local : %d\n", sockets[0].local_addr.port) ;
         printf("Erreur je sors\n") ;
