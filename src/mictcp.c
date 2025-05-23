@@ -1,8 +1,11 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 #define MAX_SIZE 5
+#define TIMEOUT 100
 
 mic_tcp_sock sockets[MAX_SIZE] ;
+int seq ;
+int expected_seq ;
 
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
@@ -15,12 +18,17 @@ int mic_tcp_socket(start_mode sm)
         printf("Erreur initialisation composantsde l'API\n") ;
         return -1 ;
    } /* Appel obligatoire */
-   set_loss_rate(0);
+   set_loss_rate(50);
    
    //pour les versions suivantes faire une fonction qui peut créer plusieurs sockets
    //boucle while qui teste l'état ?
    sockets[0].fd = 0 ;
    sockets[0].state = IDLE ;
+
+   //initialisation des numéros de séquence
+   seq = 0 ;
+   expected_seq = 0 ;
+
    return 0 ;
 }
 
@@ -68,9 +76,32 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     mic_tcp_pdu pdu ;
     pdu.header.source_port = sockets[mic_sock].local_addr.port;
     pdu.header.dest_port = sockets[mic_sock].remote_addr.port ;
+    pdu.header.seq_num = seq ;
     pdu.payload.data = mesg;
     pdu.payload.size = mesg_size;
-    int effective_send = IP_send(pdu, sockets[mic_sock].remote_addr.ip_addr);
+    mic_tcp_pdu * pack = malloc(sizeof(mic_tcp_pdu)) ;
+    pack->payload.size = 0 ;
+    mic_tcp_ip_addr * paddr_recv = malloc(sizeof(mic_tcp_ip_addr)) ;
+    paddr_recv->addr = malloc(sizeof(char)*1000) ;
+    mic_tcp_ip_addr * paddr_local = malloc(sizeof(mic_tcp_ip_addr)) ;
+    paddr_local->addr = malloc(sizeof(char)*1000) ;
+    int ack_received = 0 ;
+    int effective_send = -1 ;
+    int ret = -2 ;
+
+    while(!ack_received) {
+        effective_send = IP_send(pdu, sockets[mic_sock].remote_addr.ip_addr);
+        if((ret = IP_recv(pack, paddr_local, paddr_recv, TIMEOUT))>=0) {
+            printf("reception : ack ? %d, seq ack : %d, seq : %d\n", pack->header.ack, pack->header.seq_num, seq) ;
+            if(pack->header.ack==1 && pack->header.seq_num==seq) { 
+                ack_received = 1 ;
+            }
+        }
+        printf("valeur retour ip recv : %d\n", ret) ;
+    }
+    printf("sortie while\n") ;
+    seq++ ;
+    
     return effective_send;
 }
 
@@ -100,7 +131,7 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 int mic_tcp_close (int socket)
 {
     printf("[MIC-TCP] Appel de la fonction :  "); printf(__FUNCTION__); printf("\n");
-    sockets[0].state = CLOSED ;
+    sockets[socket].state = CLOSED ;
     return 0;
 }
 
@@ -123,5 +154,16 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
         printf("Erreur je sors\n") ;
         exit(-1) ;
     }
-    app_buffer_put(pdu.payload) ;
+    mic_tcp_pdu ack ;
+    ack.header.source_port = sockets[0].local_addr.port ;
+    ack.header.dest_port = sockets[0].remote_addr.port ;
+    ack.header.ack = 1 ;
+    ack.header.seq_num = pdu.header.seq_num ;
+    ack.header.ack_num = expected_seq + 1 ;
+    ack.payload.size = 0 ;
+    if(pdu.header.seq_num==expected_seq) {
+        app_buffer_put(pdu.payload) ;
+        expected_seq++ ;
+    }
+    IP_send(ack, remote_addr) ;
 }
