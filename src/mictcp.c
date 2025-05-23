@@ -100,7 +100,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
         printf("valeur retour ip recv : %d\n", ret) ;
     }
     printf("sortie while\n") ;
-    seq++ ;
+    seq = (seq+1) % 2 ;
     
     return effective_send;
 }
@@ -159,11 +159,11 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
     ack.header.dest_port = sockets[0].remote_addr.port ;
     ack.header.ack = 1 ;
     ack.header.seq_num = pdu.header.seq_num ;
-    ack.header.ack_num = expected_seq + 1 ;
     ack.payload.size = 0 ;
     if(pdu.header.seq_num==expected_seq) {
         app_buffer_put(pdu.payload) ;
-        expected_seq++ ;
+        expected_seq = (expected_seq+1) % 2 ;
     }
+    ack.header.ack_num = expected_seq ;
     IP_send(ack, remote_addr) ;
 }
