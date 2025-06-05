@@ -2,10 +2,43 @@
 #include <api/mictcp_core.h>
 #define MAX_SIZE 5
 #define TIMEOUT 100
+#define LOSS_ACCEPT 0.2
+#define SIZE_WINDOW 30
 
 mic_tcp_sock sockets[MAX_SIZE] ;
 int seq ;
 int expected_seq ;
+int window[SIZE_WINDOW] ;
+int * last ;
+
+void init_window() { 
+    for(int i=0; i<SIZE_WINDOW; i++) {
+        if((i%7)==1) {
+            window[i] = 1 ;
+        }
+        else {
+            window[i] = 0 ;
+        }
+    }
+}
+
+int sum(int tab[]) {
+    int sum = 0 ;
+    for(int i=0; i<SIZE_WINDOW; i++) {
+        sum += tab[i] ;
+    }
+    return sum ;
+}
+
+void update_window(int perte) { // 1 pour une perte et 0 pour un succès
+    if(last==&window[SIZE_WINDOW-1]) {
+        last = window ;
+    }
+    else {
+        last++ ;
+    }
+    *last = perte ;
+}
 
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
@@ -18,7 +51,10 @@ int mic_tcp_socket(start_mode sm)
         printf("Erreur initialisation composantsde l'API\n") ;
         return -1 ;
    } /* Appel obligatoire */
-   set_loss_rate(50);
+   set_loss_rate(20);
+   init_window() ; //on choisit d'initialiser à perte la fenêtre pour éviter 
+   // les pertes au début de la vidéo
+   last = window ;
    
    //pour les versions suivantes faire une fonction qui peut créer plusieurs sockets
    //boucle while qui teste l'état ?
@@ -70,7 +106,7 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
  * Permet de réclamer l’envoi d’une donnée applicative
  * Retourne la taille des données envoyées, et -1 en cas d'erreur
  */
-int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
+int mic_tcp_send(int mic_sock, char* mesg, int mesg_size)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
     mic_tcp_pdu pdu ;
@@ -81,26 +117,58 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     pdu.payload.size = mesg_size;
     mic_tcp_pdu * pack = malloc(sizeof(mic_tcp_pdu)) ;
     pack->payload.size = 0 ;
-    mic_tcp_ip_addr * paddr_recv = malloc(sizeof(mic_tcp_ip_addr)) ;
-    paddr_recv->addr = malloc(sizeof(char)*1000) ;
-    mic_tcp_ip_addr * paddr_local = malloc(sizeof(mic_tcp_ip_addr)) ;
-    paddr_local->addr = malloc(sizeof(char)*1000) ;
+    //mic_tcp_ip_addr * paddr_recv = malloc(sizeof(mic_tcp_ip_addr)) ;
+    //paddr_recv->addr = malloc(sizeof(char)*100) ;
+    //paddr_recv->addr_size = 100 ;
+    //mic_tcp_ip_addr * paddr_local = malloc(sizeof(mic_tcp_ip_addr)) ;
+    //paddr_local->addr = malloc(sizeof(char)*100) ;
+    //paddr_local->addr_size = 100 ;
     int ack_received = 0 ;
     int effective_send = -1 ;
     int ret = -2 ;
+    int loss_ok = 0 ;
+    sockets[mic_sock].local_addr.ip_addr.addr_size = 0;
+    sockets[mic_sock].remote_addr.ip_addr.addr_size = 0;
 
-    while(!ack_received) {
+
+    while(!ack_received && !loss_ok) {
         effective_send = IP_send(pdu, sockets[mic_sock].remote_addr.ip_addr);
-        if((ret = IP_recv(pack, paddr_local, paddr_recv, TIMEOUT))>=0) {
+        if((ret = IP_recv(pack, &(sockets[mic_sock].local_addr.ip_addr), &(sockets[mic_sock].remote_addr.ip_addr), TIMEOUT))>=0) {
             printf("reception : ack ? %d, seq ack : %d, seq : %d\n", pack->header.ack, pack->header.seq_num, seq) ;
             if(pack->header.ack==1 && pack->header.seq_num==seq) { 
                 ack_received = 1 ;
+                update_window(0) ; //mise à jour fenêtre
+                seq = (seq+1) % 2 ;
+                printf("taux perte, %f\n", ((float) sum(window))/30) ;
+            }
+            else {
+                update_window(1) ; //mise à jour fenêtre
+                seq = pack->header.ack ;
+                printf("taux perte, %f\n", ((float) sum(window))/30) ;
+                if(((float) sum(window))/30 <= (LOSS_ACCEPT + 0.001)) { 
+                    loss_ok = 1 ;
+                    printf("perte ok \n") ;
+                }
+                else {
+                    printf("reemission\n") ;
+                }
+            }
+        }
+        else {
+            update_window(1) ; //mise à jour fenêtre
+            printf("taux perte, %f\n", ((float) sum(window))/30) ;
+            if(((float) sum(window))/30 <= (LOSS_ACCEPT + 0.001)) { //test perte acceptable
+                loss_ok = 1 ;
+                printf("perte ok\n") ;
+            } //si oui fin boucle
+            //sinon continue
+            else {
+                printf("reemission\n") ;
             }
         }
         printf("valeur retour ip recv : %d\n", ret) ;
     }
     printf("sortie while\n") ;
-    seq = (seq+1) % 2 ;
     
     return effective_send;
 }
