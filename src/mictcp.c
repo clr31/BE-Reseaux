@@ -1,8 +1,7 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 #define MAX_SIZE 5
-#define TIMEOUT 100
-#define LOSS_ACCEPT 0.2
+#define TIMEOUT 2000
 #define SIZE_WINDOW 30
 
 mic_tcp_sock sockets[MAX_SIZE] ;
@@ -10,6 +9,7 @@ int seq ;
 int expected_seq ;
 int window[SIZE_WINDOW] ;
 int * last ;
+float loss_accept = 0.2 ;
 
 void init_window() { 
     for(int i=0; i<SIZE_WINDOW; i++) {
@@ -52,8 +52,7 @@ int mic_tcp_socket(start_mode sm)
         return -1 ;
    } /* Appel obligatoire */
    set_loss_rate(20);
-   init_window() ; //on choisit d'initialiser à perte la fenêtre pour éviter 
-   // les pertes au début de la vidéo
+   init_window() ; 
    last = window ;
    
    //pour les versions suivantes faire une fonction qui peut créer plusieurs sockets
@@ -117,12 +116,6 @@ int mic_tcp_send(int mic_sock, char* mesg, int mesg_size)
     pdu.payload.size = mesg_size;
     mic_tcp_pdu * pack = malloc(sizeof(mic_tcp_pdu)) ;
     pack->payload.size = 0 ;
-    //mic_tcp_ip_addr * paddr_recv = malloc(sizeof(mic_tcp_ip_addr)) ;
-    //paddr_recv->addr = malloc(sizeof(char)*100) ;
-    //paddr_recv->addr_size = 100 ;
-    //mic_tcp_ip_addr * paddr_local = malloc(sizeof(mic_tcp_ip_addr)) ;
-    //paddr_local->addr = malloc(sizeof(char)*100) ;
-    //paddr_local->addr_size = 100 ;
     int ack_received = 0 ;
     int effective_send = -1 ;
     int ret = -2 ;
@@ -138,14 +131,14 @@ int mic_tcp_send(int mic_sock, char* mesg, int mesg_size)
             if(pack->header.ack==1 && pack->header.seq_num==seq) { 
                 ack_received = 1 ;
                 update_window(0) ; //mise à jour fenêtre
-                seq = (seq+1) % 2 ;
+                seq = pack->header.ack_num ;
                 printf("taux perte, %f\n", ((float) sum(window))/30) ;
             }
             else {
                 update_window(1) ; //mise à jour fenêtre
                 seq = pack->header.ack ;
                 printf("taux perte, %f\n", ((float) sum(window))/30) ;
-                if(((float) sum(window))/30 <= (LOSS_ACCEPT + 0.001)) { 
+                if(((float) sum(window))/30 <= (loss_accept + 0.001)) { 
                     loss_ok = 1 ;
                     printf("perte ok \n") ;
                 }
@@ -157,7 +150,7 @@ int mic_tcp_send(int mic_sock, char* mesg, int mesg_size)
         else {
             update_window(1) ; //mise à jour fenêtre
             printf("taux perte, %f\n", ((float) sum(window))/30) ;
-            if(((float) sum(window))/30 <= (LOSS_ACCEPT + 0.001)) { //test perte acceptable
+            if(((float) sum(window))/30 <= (loss_accept + 0.001)) { //test perte acceptable
                 loss_ok = 1 ;
                 printf("perte ok\n") ;
             } //si oui fin boucle
@@ -183,10 +176,9 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
     mic_tcp_payload payload ;
-    //payload.data = mesg ;
+    payload.data = mesg ;
     payload.size = max_mesg_size ;
     int lu = app_buffer_get(payload) ;
-    memcpy(mesg,payload.data,lu) ;
 
     return lu;
 }
@@ -222,16 +214,19 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
         printf("Erreur je sors\n") ;
         exit(-1) ;
     }
-    mic_tcp_pdu ack ;
-    ack.header.source_port = sockets[0].local_addr.port ;
-    ack.header.dest_port = sockets[0].remote_addr.port ;
-    ack.header.ack = 1 ;
-    ack.header.seq_num = pdu.header.seq_num ;
-    ack.payload.size = 0 ;
-    if(pdu.header.seq_num==expected_seq) {
-        app_buffer_put(pdu.payload) ;
-        expected_seq = (expected_seq+1) % 2 ;
+    
+    if(!pdu.header.ack) {
+        if(pdu.header.seq_num==expected_seq) {
+            app_buffer_put(pdu.payload) ;
+            expected_seq++ ;
+        }
+        mic_tcp_pdu ack ;
+        ack.header.source_port = sockets[0].local_addr.port ;
+        ack.header.dest_port = sockets[0].remote_addr.port ;
+        ack.header.ack = 1 ;
+        ack.header.seq_num = pdu.header.seq_num ;
+        ack.payload.size = 0 ;
+        ack.header.ack_num = expected_seq ;
+        IP_send(ack, remote_addr) ;
     }
-    ack.header.ack_num = expected_seq ;
-    IP_send(ack, remote_addr) ;
 }
