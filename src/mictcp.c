@@ -1,7 +1,7 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 #define MAX_SIZE 5
-#define TIMEOUT 2000
+#define TIMEOUT 100
 #define SIZE_WINDOW 30
 
 mic_tcp_sock sockets[MAX_SIZE] ;
@@ -87,6 +87,35 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+    // début v4
+    sockets[socket].state = WAIT_SYN ;
+    mic_tcp_pdu syn ;
+    while(!(sockets[socket].state==SYN_RECEIVED)) {
+        if(IP_recv(&syn,&(sockets[socket].local_addr.ip_addr),&(addr->ip_addr),TIMEOUT)>=0) {
+            if(syn.header.syn) {
+                sockets[socket].state = SYN_RECEIVED ;
+            }
+        }
+    }
+
+    mic_tcp_pdu synack ;
+    synack.header.source_port = sockets[socket].local_addr.port ;
+    synack.header.dest_port = addr->port ;
+    synack.header.syn = 1 ;
+    synack.header.ack = 1 ;
+    mic_tcp_pdu ack ;
+
+    while(sockets[socket].state==WAIT_ACK) {
+        IP_send(synack,addr->ip_addr) ;
+        if(IP_recv(&ack,&(sockets[socket].local_addr.port),&(addr->ip_addr),TIMEOUT)>=0) {
+            if(ack.header.ack) {
+                sockets[socket].state = ESTABLISHED ;
+            }
+        }
+    }
+
+    sockets[socket].remote_addr = *addr ;
+
     return 0;
 }
 
@@ -97,6 +126,24 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+
+    mic_tcp_pdu syn ;
+    syn.header.source_port = sockets[socket].local_addr.port ;
+    syn.header.dest_port = addr.port ;
+    syn.header.syn = 1 ;
+    mic_tcp_pdu synack ;
+    
+    sockets[socket].state = WAIT_SYNACK ;
+    while(sockets[socket].state==WAIT_SYNACK) {
+        IP_send(syn,addr.ip_addr) ;
+        if(IP_recv(&synack,&(sockets[socket].local_addr.ip_addr),&(addr.ip_addr),TIMEOUT)>=0) {
+            if(synack.header.syn && synack.header.ack) {
+                sockets[0].state = SYN_RECEIVED ;
+            }
+        }
+    }
+    sockets[socket].state = WAIT_ACK ;
+
     sockets[socket].remote_addr = addr ;
     return 0;
 }
