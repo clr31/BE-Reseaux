@@ -87,22 +87,32 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-    // début v4
     sockets[socket].state = WAIT_SYN ;
-    mic_tcp_pdu syn ;
+    mic_tcp_pdu * psyn ;
+    psyn = malloc(sizeof(mic_tcp_pdu)) ;
+    psyn->payload.size = 0 ;
+
     while(!(sockets[socket].state==SYN_RECEIVED)) {
         printf("début while syn\n ") ;
-        if(IP_recv(&syn,&(sockets[socket].local_addr.ip_addr),&(addr->ip_addr),TIMEOUT)>=0) {
-            if(syn.header.syn) {
-                printf("Reçu SYN de port %d\n", syn.header.source_port);
+        if(IP_recv(psyn,&(sockets[socket].local_addr.ip_addr),&(addr->ip_addr),TIMEOUT*10)>=0) {
+            printf("dans if ip recv\n") ;
+            if(psyn->header.syn) {
+                printf("Reçu SYN de port %d\n", psyn->header.source_port);
                 sockets[socket].state = SYN_RECEIVED ;
             }
+            else{
+                printf("pas un syn\n") ;
+            } 
+            printf("apres test syn.header.syn\n") ;
         }
+        else{
+            printf("rien reçu\n") ;
+        } 
     }
     
     printf("fin while syn\n") ;
 
-    addr->port = syn.header.source_port ;
+    addr->port = psyn->header.source_port ; //??
 
     mic_tcp_pdu synack ;
     synack.header.source_port = sockets[socket].local_addr.port ;
@@ -110,11 +120,12 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
     synack.header.syn = 1 ;
     synack.header.ack = 1 ;
     mic_tcp_pdu ack ;
+    ack.payload.size = 0 ;
 
     while(!(sockets[socket].state==ESTABLISHED)) {
         printf("début while ack\n ") ;
         IP_send(synack,addr->ip_addr) ;
-        if(IP_recv(&ack,&(sockets[socket].local_addr.ip_addr),&(addr->ip_addr),TIMEOUT)>=0) {
+        if(IP_recv(&ack,&(sockets[socket].local_addr.ip_addr),&(addr->ip_addr),TIMEOUT*10)>=0) {
             if(ack.header.ack) {
                 printf("Reçu ACK de port %d\n", ack.header.source_port);
                 sockets[socket].state = ESTABLISHED ;
@@ -140,13 +151,15 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
     syn.header.source_port = sockets[socket].local_addr.port ;
     syn.header.dest_port = addr.port ;
     syn.header.syn = 1 ;
+    syn.payload.size = 0 ;
     mic_tcp_pdu synack ;
     
     sockets[socket].state = WAIT_SYNACK;
     while(!(sockets[socket].state== SYNACK_RECEIVED)) {
         printf("début while synack\n ") ;
         IP_send(syn,addr.ip_addr) ;
-        if(IP_recv(&synack,&(sockets[socket].local_addr.ip_addr),&(addr.ip_addr),TIMEOUT)>=0) {
+        printf("après IP send\n") ;
+        if(IP_recv(&synack,&(sockets[socket].local_addr.ip_addr),&(addr.ip_addr),TIMEOUT*10)>=0) {
             if(synack.header.syn && synack.header.ack) {
                  printf("Reçu SYNACK de port %d\n", synack.header.source_port);
                 sockets[socket].state = SYNACK_RECEIVED ;
@@ -156,16 +169,18 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 
     printf("fin while synack\n ") ;
 
-    sockets[socket].state = WAIT_ACK ;
+    sockets[socket].state = WAIT_ACK ; // ??
 
     //envoi du ack
     mic_tcp_pdu ack ;
     ack.header.source_port = sockets[socket].local_addr.port ;
     ack.header.dest_port = addr.port ;
     ack.header.ack = 1 ;
+    ack.payload.size = 0 ;
     IP_send(ack, addr.ip_addr) ; 
 
     sockets[socket].remote_addr = addr ;
+    sockets[socket].state = ESTABLISHED ;    
 
     return 0;
 }
@@ -283,8 +298,16 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
         printf("Erreur je sors\n") ;
         exit(-1) ;
     }
+
+    if(pdu.header.syn){
+        printf("dans process received pdu avec un syn\n") ;
+    } 
     
-    if(!pdu.header.ack) {
+    if(pdu.header.syn && pdu.header.ack){
+        printf("dans process received pdu avec un ack\n") ;
+    } 
+
+    if(!(pdu.header.ack || pdu.header.syn)) {
         if(pdu.header.seq_num==expected_seq) {
             app_buffer_put(pdu.payload) ;
             expected_seq++ ;
