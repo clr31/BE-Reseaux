@@ -105,9 +105,9 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
     synack.header.ack = 1 ;
     mic_tcp_pdu ack ;
 
-    while(sockets[socket].state==WAIT_ACK) {
+    while(!(sockets[socket].state==ESTABLISHED)) {
         IP_send(synack,addr->ip_addr) ;
-        if(IP_recv(&ack,&(sockets[socket].local_addr.port),&(addr->ip_addr),TIMEOUT)>=0) {
+        if(IP_recv(&ack,&(sockets[socket].local_addr.ip_addr),&(addr->ip_addr),TIMEOUT)>=0) {
             if(ack.header.ack) {
                 sockets[socket].state = ESTABLISHED ;
             }
@@ -133,18 +133,26 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
     syn.header.syn = 1 ;
     mic_tcp_pdu synack ;
     
-    sockets[socket].state = WAIT_SYNACK ;
-    while(sockets[socket].state==WAIT_SYNACK) {
+    sockets[socket].state = WAIT_SYNACK;
+    while(!(sockets[socket].state== SYNACK_RECEIVED)) {
         IP_send(syn,addr.ip_addr) ;
         if(IP_recv(&synack,&(sockets[socket].local_addr.ip_addr),&(addr.ip_addr),TIMEOUT)>=0) {
             if(synack.header.syn && synack.header.ack) {
-                sockets[0].state = SYN_RECEIVED ;
+                sockets[socket].state = SYNACK_RECEIVED ;
             }
         }
     }
     sockets[socket].state = WAIT_ACK ;
 
+    //envoi du ack
+    mic_tcp_pdu ack ;
+    ack.header.source_port = sockets[socket].local_addr.port ;
+    ack.header.dest_port = addr.port ;
+    ack.header.ack = 1 ;
+    IP_send(ack, addr.ip_addr) ; 
+
     sockets[socket].remote_addr = addr ;
+
     return 0;
 }
 
