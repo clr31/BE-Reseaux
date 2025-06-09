@@ -91,12 +91,18 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
     sockets[socket].state = WAIT_SYN ;
     mic_tcp_pdu syn ;
     while(!(sockets[socket].state==SYN_RECEIVED)) {
+        printf("début while syn\n ") ;
         if(IP_recv(&syn,&(sockets[socket].local_addr.ip_addr),&(addr->ip_addr),TIMEOUT)>=0) {
             if(syn.header.syn) {
+                printf("Reçu SYN de port %d\n", syn.header.source_port);
                 sockets[socket].state = SYN_RECEIVED ;
             }
         }
     }
+    
+    printf("fin while syn\n") ;
+
+    addr->port = syn.header.source_port ;
 
     mic_tcp_pdu synack ;
     synack.header.source_port = sockets[socket].local_addr.port ;
@@ -106,13 +112,16 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
     mic_tcp_pdu ack ;
 
     while(!(sockets[socket].state==ESTABLISHED)) {
+        printf("début while ack\n ") ;
         IP_send(synack,addr->ip_addr) ;
         if(IP_recv(&ack,&(sockets[socket].local_addr.ip_addr),&(addr->ip_addr),TIMEOUT)>=0) {
             if(ack.header.ack) {
+                printf("Reçu ACK de port %d\n", ack.header.source_port);
                 sockets[socket].state = ESTABLISHED ;
             }
         }
     }
+    printf("fin while ack\n ") ;
 
     sockets[socket].remote_addr = *addr ;
 
@@ -135,13 +144,18 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
     
     sockets[socket].state = WAIT_SYNACK;
     while(!(sockets[socket].state== SYNACK_RECEIVED)) {
+        printf("début while synack\n ") ;
         IP_send(syn,addr.ip_addr) ;
         if(IP_recv(&synack,&(sockets[socket].local_addr.ip_addr),&(addr.ip_addr),TIMEOUT)>=0) {
             if(synack.header.syn && synack.header.ack) {
+                 printf("Reçu SYNACK de port %d\n", synack.header.source_port);
                 sockets[socket].state = SYNACK_RECEIVED ;
             }
         }
     }
+
+    printf("fin while synack\n ") ;
+
     sockets[socket].state = WAIT_ACK ;
 
     //envoi du ack
