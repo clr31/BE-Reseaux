@@ -29,7 +29,7 @@ Phase de transfert de données avec garantie de fiabilité partielle avec % des 
 ## Implémentation de mictcp v4
 ### v4.1
 
-Phase d'établissement de connexion : L'envoi du SYN fonctionne mais pas l'envoi du SYNACK et du ACK. Si le SYNACK n'est pas réçu au début, la réémission de fonctionne pas.
+Phase d'établissement de connexion : L'envoi du SYN fonctionne (réception côté server). Le SYN-ACK est envoyé côté server mais pas forcément reçu côté client. Le problème n'intervient pas toujours lors de l'exécution. Soit la phase d'établissement de connexion s'effectue sans problèmes soit le SYN-ACK n'est jamais reçu (réémissions infinies). Si leSYN-ACK est reçu, l'envoie du ACK ne semble pas poser de problèmes.
 
 Phase de transfert de données : fonctionnelle
 
