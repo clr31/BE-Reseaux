@@ -1,6 +1,7 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 #include <time.h>
+#include <netdb.h>
 #define MAX_SIZE 5
 #define TIMEOUT 100
 #define SIZE_WINDOW 30
@@ -161,7 +162,7 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
     }
     printf("fin while ack\n ") ;*/
 
-    sockets[socket].remote_addr = *addr ;
+    //sockets[socket].remote_addr = *addr ;
     expected_seq = 20 ;
 
     return 0;
@@ -175,39 +176,63 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
 
+    sockets[socket].remote_addr = addr ;
+    //sockets[socket].local_addr.port = 3027 ;
+    //sockets[socket].local_addr.ip_addr.addr = "127.0.0.1" ;
+    //sockets[socket].local_addr.ip_addr.addr_size = 10 ;
+    mic_tcp_sock_addr local_addr ;
+    struct hostent * hp ;
+    if((hp = gethostbyname("localhost")) == NULL) {
+        printf("erreur gethostbyname\n") ;
+        exit(1) ;
+    }
+    //local_addr.ip_addr.addr = "127.0.0.1" ;
+    local_addr.ip_addr.addr = hp->h_addr ;
+    //local_addr.ip_addr.addr_size = 10 ;
+    local_addr.ip_addr.addr_size = hp->h_length ;
+    local_addr.port = 3027 ;
+    mic_tcp_bind(socket,local_addr) ;
+
     mic_tcp_pdu syn ;
+    printf("port source : %d\n", sockets[socket].local_addr.port) ;
     syn.header.source_port = sockets[socket].local_addr.port ;
     syn.header.dest_port = addr.port ;
     syn.header.seq_num = seq ;
     syn.header.syn = 1 ;
+    syn.header.ack = 0 ;
+    syn.header.fin = 0 ;
     syn.payload.size = 0 ;
     mic_tcp_pdu synack ;
+    int ret ;
     
     sockets[socket].state = WAIT_SYNACK ;
-    while(!(sockets[socket].state== SYNACK_RECEIVED)) {
+    while(!(sockets[socket].state==SYNACK_RECEIVED)) {
         printf("début while synack\n ") ;
         IP_send(syn,addr.ip_addr) ;
         printf("après IP send\n") ;
-        if(IP_recv(&synack,&(sockets[socket].local_addr.ip_addr),&(addr.ip_addr),TIMEOUT*10)>=0) {
+        if((ret = IP_recv(&synack,&(sockets[socket].local_addr.ip_addr),&(addr.ip_addr),TIMEOUT*10))>=0) {
             if(synack.header.syn && synack.header.ack) {
                 printf("Reçu SYNACK de port %d\n", synack.header.source_port);
                 seq = synack.header.ack_num ;
                 sockets[socket].state = SYNACK_RECEIVED ;
             }
         }
+        printf("retour ip recv : %d\n", ret) ;
     }
 
     printf("fin while synack\n ") ;
 
-    /*mic_tcp_pdu ack ;
-    syn.header.source_port = sockets[socket].local_addr.port ;
-    syn.header.dest_port = addr.port ;
-    syn.header.seq_num = seq ;
-    syn.header.syn = 1 ;
-    syn.payload.size = 0 ;
-    mic_tcp_pdu synack ;
+    mic_tcp_pdu ack ;
+    ack.header.source_port = sockets[socket].local_addr.port ;
+    ack.header.dest_port = addr.port ;
+    ack.header.seq_num = seq ;
+    ack.header.ack = 1 ;
+    ack.header.syn = 0 ;
+    ack.header.fin = 0 ;
+    ack.payload.size = 0 ;
+    IP_send(ack,addr.ip_addr) ;
     
-    sockets[socket].state = WAIT_SYNACK ;
+    /*sockets[socket].state = WAIT_SYNACK ;
     while(!(sockets[socket].state== SYNACK_RECEIVED)) {
         printf("début while synack\n ") ;
         IP_send(syn,addr.ip_addr) ;
@@ -221,12 +246,12 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
         }
     }*/
 
-    sockets[socket].remote_addr = addr ;
+    
     
     sockets[socket].state = ESTABLISHED ;
     seq = 20 ;
 
-    return 0;
+    return ret ;
 }
 
 /*
@@ -240,8 +265,12 @@ int mic_tcp_send(int mic_sock, char* mesg, int mesg_size)
     pdu.header.source_port = sockets[mic_sock].local_addr.port;
     pdu.header.dest_port = sockets[mic_sock].remote_addr.port ;
     pdu.header.seq_num = seq ;
+    printf("seq : %d\n", seq) ;
     pdu.payload.data = mesg;
     pdu.payload.size = mesg_size;
+    pdu.header.syn = 0 ;
+    pdu.header.ack = 0 ;
+    pdu.header.fin = 0 ;
     mic_tcp_pdu * pack = malloc(sizeof(mic_tcp_pdu)) ;
     pack->payload.size = 0 ;
     int ack_received = 0 ;
@@ -255,10 +284,11 @@ int mic_tcp_send(int mic_sock, char* mesg, int mesg_size)
     while(!ack_received && !loss_ok) {
         effective_send = IP_send(pdu, sockets[mic_sock].remote_addr.ip_addr);
         if((ret = IP_recv(pack, &(sockets[mic_sock].local_addr.ip_addr), &(sockets[mic_sock].remote_addr.ip_addr), TIMEOUT))>=0) {
-            printf("reception : ack ? %d, seq ack : %d, seq : %d\n", pack->header.ack, pack->header.seq_num, seq) ;
-            if(pack->header.ack==1 && pack->header.seq_num==seq) { 
+            printf("reception : ack ? %d, ack num : %d, seq : %d\n", pack->header.ack, pack->header.ack_num, seq) ;
+            if(pack->header.ack==1 && pack->header.ack_num==(seq+1)) { 
                 ack_received = 1 ;
                 update_window(0) ; //mise à jour fenêtre
+                printf("ack num : %d\n",pack->header.ack_num) ;
                 seq = pack->header.ack_num ;
                 printf("taux perte, %f\n", ((float) sum(window))/30) ;
             }
@@ -342,14 +372,17 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
         printf("Erreur je sors\n") ;
         exit(-1) ;
     }
+    printf("dans process received pdu\n") ;
 
     if(pdu.header.syn && pdu.header.ack && sockets[0].state == ESTABLISHED) {
+        printf("dans réémission ack\n") ;
         app_buffer_put(pdu.payload) ;
-        expected_seq = 20 ;
         mic_tcp_pdu ack ;
         ack.header.source_port = sockets[0].local_addr.port ;
         ack.header.dest_port = sockets[0].remote_addr.port ;
         ack.header.ack = 1 ;
+        ack.header.syn = 0 ;
+        ack.header.fin = 0 ;
         ack.header.seq_num = seq ;
         ack.header.ack_num = pdu.header.seq_num ;
         ack.payload.size = 0 ;
@@ -357,7 +390,26 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
         IP_send(ack, remote_addr) ;
     }
 
+    if(pdu.header.syn && sockets[0].state == WAIT_ACK) {
+        printf("syn reçu\n") ;
+        app_buffer_put(pdu.payload) ;
+        mic_tcp_pdu synack ;
+        synack.header.source_port = sockets[0].local_addr.port ;
+        synack.header.dest_port = sockets[0].remote_addr.port ;
+        synack.header.ack = 1 ;
+        synack.header.syn = 1 ;
+        synack.header.fin = 0 ;
+        synack.header.seq_num = 0 ;
+        synack.header.ack_num = pdu.header.seq_num + 1 ;
+        synack.payload.size = 0 ;
+        synack.header.ack_num = expected_seq ;
+        printf("envoi synack, remote addr : %s, port dest paquet: %d\n", remote_addr.addr, sockets[0].remote_addr.port) ;
+        IP_send(synack, remote_addr) ;
+        printf("apres ip send\n") ;
+        sockets[0].state = WAIT_ACK ;
+    }
 
+    printf("seq reçu : %d, seq attendu : %d\n",pdu.header.seq_num,expected_seq) ;
     if(pdu.header.seq_num==expected_seq) {
         printf("num seq ok\n") ;
 
@@ -365,44 +417,58 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
         printf("syn reçu\n") ;
         app_buffer_put(pdu.payload) ;
         expected_seq++ ;
+
+        sockets[0].remote_addr.ip_addr = remote_addr ;
+        sockets[0].remote_addr.port = pdu.header.source_port ;
+
         mic_tcp_pdu synack ;
         synack.header.source_port = sockets[0].local_addr.port ;
         synack.header.dest_port = sockets[0].remote_addr.port ;
         synack.header.ack = 1 ;
         synack.header.syn = 1 ;
+        synack.header.fin = 0 ;
         synack.header.seq_num = 0 ;
         synack.header.ack_num = pdu.header.seq_num + 1 ;
         synack.payload.size = 0 ;
         synack.header.ack_num = expected_seq ;
-        printf("envoi synack\n") ;
+        printf("envoi synack, remote addr : %s, port dest paquet: %d\n", remote_addr.addr, sockets[0].remote_addr.port) ;
         IP_send(synack, remote_addr) ;
         sockets[0].state = WAIT_ACK ;
     }
-    else {
-
-        if(pdu.header.ack && sockets[0].state == WAIT_ACK) {
-            printf("ack reçu\n") ;
-            app_buffer_put(pdu.payload) ;
-            expected_seq++ ;
-            sockets[0].state = ESTABLISHED ;
-        }
-        else {
-            app_buffer_put(pdu.payload) ;
-            expected_seq++ ;
-            mic_tcp_pdu ack ;
-            ack.header.source_port = sockets[0].local_addr.port ;
-            ack.header.dest_port = sockets[0].remote_addr.port ;
-            ack.header.ack = 1 ;
-            ack.header.seq_num = seq ;
-            ack.header.ack_num = pdu.header.seq_num ;
-            ack.payload.size = 0 ;
-            ack.header.ack_num = expected_seq ;
-            IP_send(ack, remote_addr) ;
-            sockets[0].state = ESTABLISHED ;
-
-        }
-        
+    else if(pdu.header.ack && sockets[0].state == WAIT_ACK) {
+        printf("ack reçu\n") ;
+        app_buffer_put(pdu.payload) ;
+        sockets[0].state = ESTABLISHED ;
+    } 
+    else if (sockets[0].state == ESTABLISHED) {
+        app_buffer_put(pdu.payload) ;
+        printf("expected seq : %d\n", expected_seq) ;
+        expected_seq++ ;
+        mic_tcp_pdu ack ;
+        ack.header.source_port = sockets[0].local_addr.port ;
+        ack.header.dest_port = sockets[0].remote_addr.port ;
+        ack.header.ack = 1 ;
+        ack.header.syn = 0 ;
+        ack.header.fin = 0 ;
+        ack.header.seq_num = seq ;
+        ack.header.ack_num = expected_seq ;
+        ack.payload.size = 0 ;
+        IP_send(ack, remote_addr) ;
     }
+    
+    }
+    else {
+        mic_tcp_pdu ack ;
+        ack.header.source_port = sockets[0].local_addr.port ;
+        ack.header.dest_port = sockets[0].remote_addr.port ;
+        ack.header.ack = 1 ;
+        ack.header.syn = 0 ;
+        ack.header.fin = 0 ;
+        ack.header.seq_num = seq ;
+        ack.header.ack_num = expected_seq ;
+        ack.payload.size = 0 ;
+        IP_send(ack, remote_addr) ;
+        seq++ ;
     }
 
 }
