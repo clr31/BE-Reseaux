@@ -306,6 +306,8 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
     //cas où le SYN-ACK a été envoyé mais pas reçu
     //on reçoit un SYN (réémission de la source) alors qu'on attend un ACK
     else if(pdu.header.syn && sockets[0].state == WAIT_ACK) {
+        sockets[0].remote_addr.ip_addr = remote_addr;
+        sockets[0].remote_addr.port = pdu.header.source_port;
         printf("syn reçu etat attente ack => réémission synack\n") ;
         mic_tcp_pdu synack ;
         synack.header.source_port = sockets[0].local_addr.port ;
